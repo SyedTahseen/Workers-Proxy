@@ -17,7 +17,7 @@ const blocked_ip_address = ['0.0.0.0', '127.0.0.1']
 const https = true
 
 // Whether to disable cache.
-const disable_cache = true
+const disable_cache = false
 
 // Replace texts.
 const replace_dict = {
@@ -30,7 +30,6 @@ addEventListener('fetch', event => {
 })
 
 async function fetchAndApply(request) {
-
     const region = request.headers.get('cf-ipcountry').toUpperCase();
     const ip_address = request.headers.get('cf-connecting-ip');
     const user_agent = request.headers.get('user-agent');
@@ -71,13 +70,19 @@ async function fetchAndApply(request) {
         let request_headers = request.headers;
         let new_request_headers = new Headers(request_headers);
 
-        new_request_headers.set('Host', url.hostname);
-        new_request_headers.set('Referer', url.hostname);
+        new_request_headers.set('Host', upstream_domain);
+        new_request_headers.set('Referer', url.protocol + '//' + url_hostname);
 
         let original_response = await fetch(url.href, {
             method: method,
-            headers: new_request_headers
+            headers: new_request_headers,
+            body: request.body
         })
+
+        connection_upgrade = new_request_headers.get("Upgrade");
+        if (connection_upgrade && connection_upgrade.toLowerCase() == "websocket") {
+            return original_response;
+        }
 
         let original_response_clone = original_response.clone();
         let original_text = null;
@@ -87,7 +92,7 @@ async function fetchAndApply(request) {
 		
 		if (disable_cache) {
 			new_response_headers.set('Cache-Control', 'no-store');
-		}
+	    }
 
         new_response_headers.set('access-control-allow-origin', '*');
         new_response_headers.set('access-control-allow-credentials', true);
@@ -95,12 +100,12 @@ async function fetchAndApply(request) {
         new_response_headers.delete('content-security-policy-report-only');
         new_response_headers.delete('clear-site-data');
 		
-		if(new_response_headers.get("x-pjax-url")) {
+		if (new_response_headers.get("x-pjax-url")) {
             new_response_headers.set("x-pjax-url", response_headers.get("x-pjax-url").replace("//" + upstream_domain, "//" + url_hostname));
         }
 		
         const content_type = new_response_headers.get('content-type');
-        if (content_type.includes('text/html') && content_type.includes('UTF-8')) {
+        if (content_type != null && content_type.includes('text/html') && content_type.includes('UTF-8')) {
             original_text = await replace_response_text(original_response_clone, upstream_domain, url_hostname);
         } else {
             original_text = original_response_clone.body
